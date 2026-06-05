@@ -1,0 +1,12 @@
+build/
+test-logs/
+nimcache/
+*.exe
+*.dylib
+*.so
+*.dll
+*.a
+*.o
+*.obj
+.repro/
+result
