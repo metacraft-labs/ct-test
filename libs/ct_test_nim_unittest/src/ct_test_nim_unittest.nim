@@ -206,11 +206,37 @@ proc build*(tool: BuildNimUnittest;
 
 proc run*(self: NimUnittestBinary; filter = "";
           actionId = ""; deps: openArray[string] = [];
-          after: openArray[BuildActionDef] = []): BuildActionDef
-    {.discardable.} =
+          after: openArray[BuildActionDef] = [];
+          requiredBinaries: openArray[string] = [];
+          extraInputs: openArray[string] = [];
+          cacheable = true;
+          actionCachePolicy = defaultActionCachePolicy();
+          registerImplicitName = true):
+    BuildActionDef {.discardable.} =
   ## Emit one execution edge that runs the test binary. The bound
   ## ``self.path`` flows in as a synthesised ``binary`` input flag so
   ## the action cache keys on the binary content.
+  ##
+  ## ``requiredBinaries`` (Bootstrap-And-Self-Build B3): paths of
+  ## additional executable artifacts the test subprocess depends on at
+  ## runtime — e.g. ``./build/bin/repro`` for e2e tests that spawn the
+  ## reprobuild CLI. Each entry is recorded as a typed input to the
+  ## execute edge so the engine (a) builds the binary before the
+  ## execute edge runs and (b) re-runs the execute edge when the
+  ## binary's content changes. ``extraInputs`` is the generic escape
+  ## hatch for any other file dependency.
+  ##
+  ## ``registerImplicitName`` (B3): when ``false`` the implicit-target-
+  ## name registration is skipped. The two-edge shape introduced by B3
+  ## emits BOTH a build edge and an execute edge per ``TestSpec``;
+  ## both edges would otherwise compute the SAME implicit name (the
+  ## binary basename) and the package's target-export table rejects
+  ## the second registration with a ``duplicate implicit target name``
+  ## diagnostic. Callers in reprobuild's ``build:`` block pass
+  ## ``false`` and rely on the explicit ``actionId`` for the execute
+  ## edge's selector. The default stays ``true`` so existing single-
+  ## edge call sites (the Typed-Outputs M1 fixtures, ad-hoc one-off
+  ## ``run`` calls) keep their implicit-name behaviour.
   var cliArgs: seq[PublicCliArg] = @[]
   cliArgs.add(inputArg("binary", self.path))
   if filter.len > 0:
@@ -220,15 +246,26 @@ proc run*(self: NimUnittestBinary; filter = "";
   let selectedActionId =
     if actionId.len > 0: actionId
     else: defaultToolActionId(call)
+  var allExtraInputs: seq[string] = @[]
+  for path in requiredBinaries:
+    if path.len > 0:
+      allExtraInputs.add(path)
+  for path in extraInputs:
+    if path.len > 0:
+      allExtraInputs.add(path)
   result = recordToolInvocation(selectedActionId, call,
     deps = combineActionDeps(deps, after),
-    dependencyPolicy = declaredOnlyDependencyPolicy())
-  let implicitNames = computeImplicitTargetNames(call, @["binary"])
-  if implicitNames.len > 0:
-    setRegisteredActionTargetNames(result.id, implicitNames)
-    registerImplicitTargetExports(result.id,
-      NimUnittestToolId, implicitNames,
-      "ct_test_nim_unittest.nim", 0)
+    extraInputs = allExtraInputs,
+    cacheable = cacheable,
+    dependencyPolicy = declaredOnlyDependencyPolicy(),
+    actionCachePolicy = actionCachePolicy)
+  if registerImplicitName:
+    let implicitNames = computeImplicitTargetNames(call, @["binary"])
+    if implicitNames.len > 0:
+      setRegisteredActionTargetNames(result.id, implicitNames)
+      registerImplicitTargetExports(result.id,
+        NimUnittestToolId, implicitNames,
+        "ct_test_nim_unittest.nim", 0)
 
 proc runTest*(self: NimUnittestBinary; testName: string;
               actionId = ""; deps: openArray[string] = [];
