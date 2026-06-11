@@ -96,6 +96,8 @@ proc build*(tool: BuildNimUnittest;
             binary: string;
             defines: seq[string] = @[];
             imports: seq[string] = @[];
+            extraPassC: seq[string] = @[];
+            extraPassL: seq[string] = @[];
             threadsOn = true;
             hintsOff = true;
             warningsOff = true;
@@ -148,6 +150,23 @@ proc build*(tool: BuildNimUnittest;
   if imports.len > 0:
     cliArgs.add(cliArgSeq(name = "imports", value = imports,
       alias = "--import:", format = cafConcat, repeated = true))
+
+  # Bootstrap-And-Self-Build B4: ``extraPassC`` / ``extraPassL`` are
+  # repeated concat-form flags that emit one ``--passC:<value>`` /
+  # ``--passL:<value>`` per entry. These cover the macOS-arm64 HCR
+  # workaround (``--passC:-fpatchable-function-entry=16,0`` +
+  # ``--passL:-Wl,-segprot,__HCR,rwx,rwx``) that previously lived in
+  # ``scripts/run_tests.sh`` as a direct ``nim c`` re-compile loop —
+  # the typed-tool's ``defines:`` slot only carries ``-d:`` defines,
+  # not arbitrary passC/passL. Surface matches the ``nim.c`` typed-
+  # tool's ``passC`` / ``passL`` flags in
+  # ``repro_dsl_stdlib/packages/nim.nim``.
+  if extraPassC.len > 0:
+    cliArgs.add(cliArgSeq(name = "extraPassC", value = extraPassC,
+      alias = "--passC:", format = cafConcat, repeated = true))
+  if extraPassL.len > 0:
+    cliArgs.add(cliArgSeq(name = "extraPassL", value = extraPassL,
+      alias = "--passL:", format = cafConcat, repeated = true))
 
   # ``binary`` is the output path. Nim's ``nim c`` flag is ``--out:`` in
   # concat form; tagging the arg with ``role = output`` makes the
